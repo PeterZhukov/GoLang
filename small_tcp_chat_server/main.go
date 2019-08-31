@@ -9,12 +9,17 @@ import (
 	"net"
 )
 
+// Message структура сообщения
 type Message struct {
 	conn net.Conn
 	message []byte
 }
 
-func startChannels(){
+// selectChannels
+// либо отправляет сообщение всем присоединившимся
+// либо добавляет новое подключение в список подключений
+// либо удаляет подключение из списка подключений
+func selectChannels(){
 	for {
 		select {
 			case message := <- messages:
@@ -29,6 +34,7 @@ func startChannels(){
 	}
 }
 
+// broadcaseMessage отправляет соощение всем подключившимся, кроме того, от кого это сообщение пришло
 func broadcastMessage(m *Message){
 	for _, conn := range connections {
 		if m.conn != conn {
@@ -40,6 +46,7 @@ func broadcastMessage(m *Message){
 	}
 }
 
+// removeConn удаляет подключение из списка подключений и закрывает его
 func removeConn(conn net.Conn){
 	var i int
 	for i = range connections {
@@ -48,9 +55,11 @@ func removeConn(conn net.Conn){
 		}
 	}
 	connections = append(connections[:i], connections[i+1:]...)
+	conn.Close()
 }
 
-func handleRequest(conn net.Conn){
+// handleMessage получает байты из TCP подключения и отправляет их в канал messages
+func handleMessage(conn net.Conn){
 	reader := bufio.NewReader(conn)
 	var buffer  bytes.Buffer
 	for {
@@ -59,7 +68,6 @@ func handleRequest(conn net.Conn){
 			if err != nil {
 				if err == io.EOF {
 					removeClient <- conn
-					conn.Close()
 					return
 				}
 				log.Fatal(err)
@@ -79,9 +87,13 @@ func handleRequest(conn net.Conn){
 	}
 }
 
+// connections массив всех подключений
 var connections []net.Conn
+// message канал сообщений, сюда приходят все сообщения и затем они рассылаются все подключившимся
 var messages = make(chan *Message)
+// addClient канал для добавления нового подключившегося в массив connections
 var addClient = make(chan net.Conn)
+// removeClient катал для удаления подключения (для избежания race conditions)
 var removeClient = make(chan net.Conn)
 
 func main(){
@@ -93,13 +105,13 @@ func main(){
 	fmt.Println("Server is listening on: ", address)
 	defer server.Close()
 
-	go startChannels()
+	go selectChannels()
 	for {
 		conn, err := server.Accept()
 		if err != nil {
 			log.Fatal(err)
 		}
 		addClient <- conn
-		go handleRequest(conn)
+		go handleMessage(conn)
 	}
 }
